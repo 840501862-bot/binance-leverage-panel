@@ -28,3 +28,12 @@
 ## 安全
 
 密钥只存在本机浏览器 localStorage，不写入代码、不上传服务器。换电脑或清除浏览器数据后需要重新填写。
+
+## 在线访问
+
+- 网页（GitHub Pages）：https://840501862-bot.github.io/binance-leverage-panel/
+- 仓库：https://github.com/840501862-bot/binance-leverage-panel
+
+浏览器打开 Pages 地址即可直接使用，密钥同样只存在你自己的浏览器里。
+
+> 部署说明：本机 `github.com:443` 不可达、`api.github.com` 可达，仓库内容通过 GitHub Contents API 提交。后续若要在本地 `git push`，需先开启代理。
