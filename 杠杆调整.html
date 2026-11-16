@@ -1,0 +1,865 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>当前仓位 · 杠杆调整</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230d1424'/%3E%3Cpath d='M7 22 L13 15 L18 19 L25 10' stroke='%234d8ef0' stroke-width='2.4' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Ccircle cx='25' cy='10' r='2.4' fill='%2322c55e'/%3E%3C/svg%3E">
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#080d17; --panel:#0f1727;
+    --line:#1d2a44; --line2:#27395c;
+    --txt:#e9edf7; --sub:#8797b4; --dim:#5f708c;
+    --acc:#4d8ef0; --acc2:#79b4ff;
+    --up:#22c55e; --down:#f05252; --warn:#f0b357;
+    --mono:"Consolas","SF Mono","JetBrains Mono",ui-monospace,monospace;
+  }
+  html,body{ min-height:100%; }
+  body{
+    font-family:"Microsoft YaHei UI","PingFang SC",system-ui,-apple-system,"Segoe UI",sans-serif;
+    background:radial-gradient(1100px 620px at 12% -10%, #12213c 0%, transparent 60%),
+               radial-gradient(900px 520px at 100% 100%, #101b30 0%, transparent 62%),
+               var(--bg);
+    color:var(--txt);
+    padding:26px 22px 40px;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{ max-width:1120px; margin:0 auto; }
+
+  /* ---------- 头部 ---------- */
+  header{
+    display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap;
+    padding-bottom:14px; border-bottom:1px solid var(--line);
+  }
+  .mark{
+    width:38px; height:38px; border-radius:10px; flex:none;
+    background:linear-gradient(150deg,#17253e,#0d1524);
+    border:1px solid var(--line2);
+    display:grid; place-items:center;
+  }
+  .mark svg{ width:20px; height:20px; }
+  .hdr-main{ min-width:0; }
+  h1{ font-size:20px; letter-spacing:.5px; font-weight:600; line-height:1.2; }
+  .sub{ font-size:12px; color:var(--sub); margin-top:5px; }
+  .hdr-right{
+    margin-left:auto; display:flex; align-items:center; gap:14px;
+    font-size:12px; color:var(--dim); font-family:var(--mono);
+  }
+  .key-state{ font-family:inherit; font-size:11.5px; color:var(--warn); letter-spacing:.3px; }
+  .key-state.on{ color:var(--up); }
+  .stamp{ font-family:var(--mono); }
+  .stamp:empty{ display:none; }
+  /* 扁平小按钮：设置键 / 分页键共用同一套底色与悬停态 */
+  .set-btn, .pg-btn{
+    font-family:inherit; font-size:12.5px; font-weight:400; letter-spacing:.35px;
+    color:#b9c8e2; background:#152238; border:1px solid var(--line2);
+    border-radius:8px; cursor:pointer; box-shadow:none;
+    transition:border-color .15s, color .15s, background .15s;
+  }
+  .set-btn{ display:inline-flex; align-items:center; gap:6px; padding:8px 14px; }
+  .set-btn svg{ width:14px; height:14px; opacity:.85; }
+  .set-btn:hover, .pg-btn:hover:not(:disabled){ color:var(--acc2); border-color:#33507f; background:#182740; }
+  .set-btn:hover svg{ opacity:1; }
+  .pg-btn{ padding:7px 14px; }
+  .pg-btn:disabled{ color:#5a6a86; border-color:#1c2740; cursor:not-allowed; background:transparent; }
+
+  /* ---------- 面板 ---------- */
+  section.panel{
+    margin-top:18px; background:linear-gradient(180deg,var(--panel),#0c1422);
+    border:1px solid var(--line); border-radius:14px; overflow:hidden;
+  }
+  .panel-hd{
+    display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+    padding:13px 16px; border-bottom:1px solid var(--line); background:rgba(19,29,49,.55);
+  }
+  .panel-hd h2{ font-size:13px; font-weight:600; letter-spacing:.6px; color:#cfdaee; }
+  .panel-hd h2::before{
+    content:""; display:inline-block; width:3px; height:13px; margin-right:8px;
+    background:var(--acc); border-radius:2px; vertical-align:-2px;
+  }
+  .tiny{ font-size:11.5px; color:var(--dim); }
+  .count{ margin-left:auto; font-size:12px; color:var(--acc2); font-family:var(--mono); }
+
+  /* ---------- 搜索框 ---------- */
+  .search{ position:relative; margin-left:6px; flex:1 1 220px; max-width:320px; min-width:150px; }
+  .search > svg{
+    position:absolute; left:11px; top:50%; transform:translateY(-50%);
+    width:14px; height:14px; color:#6d80a0; pointer-events:none;
+  }
+  .search input{
+    width:100%; height:34px; padding:0 30px 0 33px;
+    font-family:inherit; font-size:12.5px; letter-spacing:.2px;
+  }
+  .search-clear{
+    position:absolute; right:6px; top:50%; transform:translateY(-50%);
+    width:22px; height:22px; padding:0; border-radius:50%; box-shadow:none;
+    background:transparent; border:none; color:#7186a5; font-size:15px; line-height:1;
+    display:grid; place-items:center; cursor:pointer;
+  }
+  .search-clear:hover{ background:#1c2b45; color:var(--acc2); filter:none; }
+
+  .fields{ display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:16px; }
+  .field{ display:flex; flex-direction:column; gap:7px; min-width:0; }
+  .field span{ font-size:11.5px; color:var(--sub); letter-spacing:.4px; }
+  input{
+    width:100%; font-family:var(--mono); font-size:12.5px; color:var(--txt);
+    background:#0a1220; border:1px solid var(--line2); border-radius:9px;
+    padding:10px 12px; outline:none; transition:border-color .15s, box-shadow .15s;
+  }
+  input::placeholder{ color:#4a5c7a; }
+  input:focus{ border-color:var(--acc); box-shadow:0 0 0 3px rgba(77,142,240,.14); }
+
+  .actions{ display:flex; align-items:center; gap:10px; padding:0 16px 18px; flex-wrap:wrap; }
+  button{
+    font-family:inherit; font-size:13px; font-weight:600; letter-spacing:.5px;
+    border:none; border-radius:9px; padding:10px 26px; cursor:pointer; color:#fff;
+    background:linear-gradient(150deg,#2f79e0,#1f56a8);
+    box-shadow:0 6px 18px rgba(38,102,196,.28);
+    transition:filter .15s, transform .06s, box-shadow .15s;
+  }
+  button:hover:not(:disabled){ filter:brightness(1.12); }
+  button:active:not(:disabled){ transform:translateY(1px); }
+  button:disabled{ background:#1c2637; color:#63748f; box-shadow:none; cursor:not-allowed; }
+  button.ghost{
+    background:transparent; border:1px solid var(--line2); color:var(--sub);
+    box-shadow:none; font-weight:400; padding:10px 18px;
+  }
+  button.ghost:hover:not(:disabled){ color:var(--acc2); border-color:#33507f; }
+  .hd-btn{ padding:7px 20px; font-size:12.5px; border-radius:8px; box-shadow:none; }
+
+  /* ---------- 状态 ---------- */
+  .status{
+    padding:12px 16px; font-size:12.5px; line-height:1.65; color:var(--sub);
+    border-bottom:1px solid var(--line); background:rgba(10,17,29,.6);
+  }
+  .status.ok{ color:#57d98a; }
+  .status.err{ color:#ff8b8b; }
+  .status.load{ color:var(--acc2); }
+  code{
+    font-family:var(--mono); font-size:11.5px; color:#93a6c4;
+    background:#0a1220; border:1px solid var(--line); border-radius:5px; padding:1px 6px;
+  }
+  .dots::after{ content:""; animation:dots 1.1s steps(4,end) infinite; }
+  @keyframes dots{ 0%{content:"";} 25%{content:".";} 50%{content:"..";} 75%{content:"...";} 100%{content:"";} }
+
+  /* ---------- 表格 ---------- */
+  .tbl-wrap{ overflow-x:auto; }
+  table{ width:100%; border-collapse:collapse; table-layout:fixed; min-width:640px; font-size:13px; }
+  col.c1{ width:30%; } col.c2{ width:16%; } col.c3{ width:34%; } col.c4{ width:20%; }
+  thead th{
+    text-align:left; font-weight:600; font-size:11.5px; letter-spacing:.8px; color:#7d90b2;
+    padding:11px 16px; background:rgba(15,23,39,.9); border-bottom:1px solid var(--line);
+    position:sticky; top:0; z-index:1;
+  }
+  tbody td{
+    padding:12px 16px; border-bottom:1px solid #161f33; vertical-align:middle;
+  }
+  tbody tr:last-child td{ border-bottom:none; }
+  tbody tr:hover td{ background:rgba(31,49,79,.22); }
+  .sym{ font-family:var(--mono); font-size:13px; font-weight:600; letter-spacing:.3px; color:#dce6f7; }
+  .dir{ display:inline-flex; align-items:center; gap:6px; font-size:12.5px; font-weight:600; }
+  .dir i{ width:0; height:0; display:block; }
+  .dir.long{ color:var(--up); }
+  .dir.long i{ border-left:5px solid transparent; border-right:5px solid transparent; border-bottom:8px solid var(--up); }
+  .dir.short{ color:var(--down); }
+  .dir.short i{ border-left:5px solid transparent; border-right:5px solid transparent; border-top:8px solid var(--down); }
+  .num{ font-family:var(--mono); font-size:13px; color:#e2e9f7; font-variant-numeric:tabular-nums; }
+  .lev{ font-family:var(--mono); font-size:13px; font-weight:600; color:var(--warn); }
+  .lev .x{ font-size:11px; opacity:.7; margin-left:1px; }
+  .empty{ text-align:center; color:var(--dim); font-size:12.5px; padding:34px 16px !important; }
+  .foot{ padding:11px 16px; font-size:11.5px; color:var(--dim); line-height:1.7; border-top:1px solid var(--line); }
+
+  /* ---------- 分页 ---------- */
+  .pager{
+    display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    padding:12px 16px; border-top:1px solid var(--line); background:rgba(19,29,49,.42);
+  }
+  .pager .page-info{ font-size:12px; color:var(--sub); margin-right:auto; font-family:var(--mono); }
+  .pager .pg-btns{ display:flex; align-items:center; gap:8px; }
+  .pg-now{ font-family:var(--mono); font-size:12.5px; color:var(--acc2); min-width:56px; text-align:center; }
+
+  /* ---------- 杠杆可编辑按钮 / 修改弹窗 ---------- */
+  .lev-btn{
+    display:inline-flex; align-items:center; gap:7px;
+    background:transparent; border:1px solid transparent; border-radius:7px;
+    padding:3px 8px 3px 6px; margin-left:-6px; cursor:pointer; box-shadow:none;
+    font-weight:400; transition:background .15s, border-color .15s;
+  }
+  .lev-btn:hover{ background:#16243c; border-color:var(--line2); filter:none; }
+  .lev-btn:focus-visible{ outline:none; border-color:var(--acc); }
+  .lev-btn .pen{ width:12px; height:12px; opacity:.32; color:#a9bcd8; flex:none; transition:opacity .15s; }
+  .lev-btn:hover .pen{ opacity:.9; color:var(--acc2); }
+
+  .mask{
+    position:fixed; inset:0; z-index:60; display:flex; align-items:center; justify-content:center;
+    padding:20px; background:rgba(4,8,15,.74); backdrop-filter:blur(3px);
+  }
+  .dlg{
+    width:100%; max-width:390px; border-radius:14px; overflow:hidden;
+    background:linear-gradient(180deg,#101a2c,#0b1320);
+    border:1px solid var(--line2); box-shadow:0 26px 64px rgba(0,0,0,.6);
+  }
+  .dlg-hd{
+    display:flex; align-items:baseline; gap:10px;
+    padding:16px 18px 12px; border-bottom:1px solid var(--line);
+  }
+  .dlg-hd h3{ font-size:14px; letter-spacing:.6px; color:#dbe6f8; font-weight:600; }
+  .dlg-cur{ margin-left:auto; font-family:var(--mono); font-size:12px; color:var(--sub); }
+  .dlg-body{ padding:16px 18px 0; }
+  .dlg-tip{ min-height:34px; margin-top:10px; font-size:12px; line-height:1.6; color:var(--sub); }
+  .dlg-tip.err{ color:#ff8b8b; }
+  .dlg-ft{ display:flex; justify-content:flex-end; gap:10px; padding:12px 18px 16px; }
+  #levInput{ font-size:15px; letter-spacing:1px; padding:11px 14px; }
+
+  @media (max-width:720px){
+    body{ padding:18px 14px 30px; }
+    .fields{ grid-template-columns:1fr; }
+    .hdr-right{ width:100%; margin-left:0; justify-content:flex-end; gap:10px; }
+    .stamp{ display:none; }
+    h1{ font-size:18px; }
+    table{ min-width:0; font-size:12px; }
+    thead th, tbody td{ padding:9px 10px; }
+    thead th{ letter-spacing:.4px; }
+    .sub{ font-size:11px; }
+    .sym, .num, .lev{ font-size:12px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- ===== 头部 ===== -->
+  <header>
+    <div class="mark" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#4d8ef0" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 17l5-5 4 4 8-9"/>
+        <circle cx="21" cy="7" r="1.6" fill="#22c55e" stroke="none"/>
+      </svg>
+    </div>
+    <div class="hdr-main">
+      <h1>当前仓位</h1>
+      <p class="sub">币安 U 本位合约 · 仓位名称 / 多空方向 / 仓位数量 / 杠杆倍数</p>
+    </div>
+    <div class="hdr-right">
+      <span class="key-state" id="keyState">密钥未配置</span>
+      <span class="stamp" id="stamp"></span>
+      <button class="set-btn" id="btnSettings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3.2"/>
+          <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1.1-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1.1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1z"/>
+        </svg>
+        设置
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== 视图：主界面 ===== -->
+  <div id="viewMain">
+    <section class="panel">
+      <div class="panel-hd">
+        <h2>持仓列表</h2>
+        <div class="search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="6.2"/><path d="M15.6 15.6L20 20"/>
+          </svg>
+          <input id="filterInput" type="text" autocomplete="off" spellcheck="false" placeholder="搜索交易对，如 BTC">
+          <button class="search-clear" id="btnClearFilter" title="清空搜索" style="display:none">×</button>
+        </div>
+        <span class="count" id="count"></span>
+        <button id="btnFetch" class="hd-btn">获取</button>
+      </div>
+      <div class="status" id="status">点击「获取」读取当前仓位；密钥在上方「设置」里填写。</div>
+      <div class="tbl-wrap">
+        <table>
+          <colgroup>
+            <col class="c1"><col class="c2"><col class="c3"><col class="c4">
+          </colgroup>
+          <thead>
+            <tr>
+              <th>仓位名称</th>
+              <th>多空方向</th>
+              <th>仓位数量（USDT）</th>
+              <th>杠杆倍数</th>
+            </tr>
+          </thead>
+          <tbody id="tbody">
+            <tr><td class="empty" colspan="4">暂无数据</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pager" id="pager" style="display:none">
+        <span class="page-info" id="pageInfo"></span>
+        <div class="pg-btns">
+          <button class="pg-btn" id="btnPrev">上一页</button>
+          <span class="pg-now" id="pageNow">—</span>
+          <button class="pg-btn" id="btnNext">下一页</button>
+        </div>
+      </div>
+      <p class="foot">数据来自币安合约 <code>/fapi/v2/positionRisk</code>，只列出数量不为 0 的仓位。仓位数量按标记价格折算为 USDT 名义价值（持仓量 × 标记价格），按金额从大到小排列，每页 15 个交易对。<strong>点击杠杆倍数可修改该合约杠杆</strong>。需要本机可访问币安（国内网络请先开启代理），否则会提示请求超时。</p>
+    </section>
+  </div>
+
+  <!-- ===== 视图：设置 ===== -->
+  <div id="viewSettings" style="display:none">
+    <section class="panel">
+      <div class="panel-hd">
+        <h2>API 密钥设置</h2>
+        <span class="tiny">只保存在本浏览器 localStorage，不上传到任何服务器</span>
+      </div>
+      <div class="fields">
+        <label class="field">
+          <span>API Key</span>
+          <input id="apiKey" type="text" autocomplete="off" spellcheck="false" placeholder="粘贴 API Key">
+        </label>
+        <label class="field">
+          <span>Secret Key</span>
+          <input id="apiSecret" type="password" autocomplete="off" spellcheck="false" placeholder="粘贴 Secret Key">
+        </label>
+      </div>
+      <div class="actions">
+        <button id="btnSaveKeys">保存</button>
+        <button id="btnClear" class="ghost">清除密钥</button>
+        <button id="btnBack" class="ghost">返回</button>
+        <span class="tiny" id="saveHint"></span>
+      </div>
+      <p class="foot">在币安「API 管理」中给这个 Key 勾选「允许合约」权限，建议同时绑定 IP。只查看仓位时用只读即可；<strong>要修改杠杆，Key 必须有合约交易权限</strong>。密钥只保存在本机浏览器，不上传到任何服务器。</p>
+    </section>
+  </div>
+
+  <!-- ===== 修改杠杆弹窗 ===== -->
+  <div class="mask" id="levMask" style="display:none">
+    <div class="dlg" role="dialog" aria-modal="true" aria-labelledby="levTitle">
+      <div class="dlg-hd">
+        <h3 id="levTitle">修改杠杆</h3>
+        <span class="dlg-cur" id="levCur"></span>
+      </div>
+      <div class="dlg-body">
+        <label class="field">
+          <span>新的杠杆倍数</span>
+          <input id="levInput" type="number" inputmode="numeric" min="1" max="150" step="1" autocomplete="off" placeholder="例如 10">
+        </label>
+        <div class="dlg-tip" id="levTip"></div>
+      </div>
+      <div class="dlg-ft">
+        <button class="ghost" id="btnLevCancel">取消</button>
+        <button id="btnLevSave">确定修改</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   配置
+   ============================================================ */
+const FAPI = "https://fapi.binance.com";
+const LS_KEY = "lev_api_key_v1";
+const LS_SEC = "lev_api_secret_v1";
+
+/* ============================================================
+   纯 JS SHA-256 / HMAC-SHA256
+   （不依赖 crypto.subtle，file:// 直接打开也能正常签名）
+   ============================================================ */
+/* SHA-BEGIN */
+const SHA_K = new Uint32Array([
+  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+]);
+const rotr = (x, n) => ((x >>> n) | (x << (32 - n))) >>> 0;
+
+function sha256Bytes(data){
+  const len = data.length;
+  const blockBytes = (((len + 9) + 63) >> 6) << 6;
+  const buf = new Uint8Array(blockBytes);
+  buf.set(data);
+  buf[len] = 0x80;
+  const dv = new DataView(buf.buffer);
+  const bits = len * 8;
+  dv.setUint32(blockBytes - 8, Math.floor(bits / 4294967296) >>> 0);
+  dv.setUint32(blockBytes - 4, (bits % 4294967296) >>> 0);
+  const h = new Uint32Array([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]);
+  const w = new Uint32Array(64);
+  for (let off = 0; off < blockBytes; off += 64){
+    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4);
+    for (let i = 16; i < 64; i++){
+      const a15 = w[i-15], a2 = w[i-2];
+      const s0 = (rotr(a15,7) ^ rotr(a15,18) ^ (a15 >>> 3)) >>> 0;
+      const s1 = (rotr(a2,17) ^ rotr(a2,19) ^ (a2 >>> 10)) >>> 0;
+      w[i] = (w[i-16] + s0 + w[i-7] + s1) >>> 0;
+    }
+    let a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], f = h[5], g = h[6], hh = h[7];
+    for (let i = 0; i < 64; i++){
+      const S1 = (rotr(e,6) ^ rotr(e,11) ^ rotr(e,25)) >>> 0;
+      const ch = ((e & f) ^ (~e & g)) >>> 0;
+      const t1 = (hh + S1 + ch + SHA_K[i] + w[i]) >>> 0;
+      const S0 = (rotr(a,2) ^ rotr(a,13) ^ rotr(a,22)) >>> 0;
+      const maj = ((a & b) ^ (a & c) ^ (b & c)) >>> 0;
+      const t2 = (S0 + maj) >>> 0;
+      hh = g; g = f; f = e;
+      e = (d + t1) >>> 0;
+      d = c; c = b; b = a;
+      a = (t1 + t2) >>> 0;
+    }
+    h[0] = (h[0] + a) >>> 0; h[1] = (h[1] + b) >>> 0; h[2] = (h[2] + c) >>> 0; h[3] = (h[3] + d) >>> 0;
+    h[4] = (h[4] + e) >>> 0; h[5] = (h[5] + f) >>> 0; h[6] = (h[6] + g) >>> 0; h[7] = (h[7] + hh) >>> 0;
+  }
+  const out = new Uint8Array(32);
+  const odv = new DataView(out.buffer);
+  for (let i = 0; i < 8; i++) odv.setUint32(i * 4, h[i]);
+  return out;
+}
+
+const TE = new TextEncoder();
+function bytesToHex(bytes){
+  let s = "";
+  for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, "0");
+  return s;
+}
+function hmacSha256Hex(secret, msg){
+  const keyBytes = TE.encode(secret);
+  const msgBytes = TE.encode(msg);
+  const bs = 64;
+  const key = keyBytes.length > bs ? sha256Bytes(keyBytes) : keyBytes;
+  const pad = new Uint8Array(bs);
+  pad.set(key);
+  const inner = new Uint8Array(bs + msgBytes.length);
+  const outer = new Uint8Array(bs + 32);
+  for (let i = 0; i < bs; i++){ inner[i] = pad[i] ^ 0x36; outer[i] = pad[i] ^ 0x5c; }
+  inner.set(msgBytes, bs);
+  outer.set(sha256Bytes(inner), bs);
+  return bytesToHex(sha256Bytes(outer));
+}
+/* SHA-END */
+
+/* ============================================================
+   工具
+   ============================================================ */
+const $ = id => document.getElementById(id);
+/* 统一的本地时间戳，获取成功与改杠杆成功共用 */
+function nowTime(){
+  return new Date().toLocaleTimeString("zh-CN", { hour12:false });
+}
+
+function loadKeys(){
+  try{
+    return { key: localStorage.getItem(LS_KEY) || "", secret: localStorage.getItem(LS_SEC) || "" };
+  }catch(e){ return { key:"", secret:"" }; }
+}
+function refreshKeyState(){
+  const k = loadKeys();
+  const on = !!(k.key && k.secret);
+  const el = $("keyState");
+  el.textContent = on ? "密钥已配置" : "密钥未配置";
+  el.className = "key-state" + (on ? " on" : "");
+}
+function saveKeys(k, s){
+  try{
+    localStorage.setItem(LS_KEY, k);
+    localStorage.setItem(LS_SEC, s);
+    $("saveHint").textContent = "密钥已保存到本浏览器";
+  }catch(e){
+    $("saveHint").textContent = "本浏览器禁用了 localStorage，密钥无法保存（本次仍可用）";
+  }
+}
+function clearKeys(){
+  try{ localStorage.removeItem(LS_KEY); localStorage.removeItem(LS_SEC); }catch(e){}
+  $("apiKey").value = "";
+  $("apiSecret").value = "";
+  $("saveHint").textContent = "已清除本浏览器里的密钥";
+  refreshKeyState();
+}
+
+/* ------------------------------------------------------------
+   视图切换：#/ 主界面，#/settings 设置页
+   ------------------------------------------------------------ */
+function route(){
+  const setView = location.hash.indexOf("settings") !== -1;
+  $("viewMain").style.display = setView ? "none" : "";
+  $("viewSettings").style.display = setView ? "" : "none";
+  if (setView){
+    const k = loadKeys();
+    $("apiKey").value = k.key;
+    $("apiSecret").value = k.secret;
+    $("saveHint").textContent = (k.key && k.secret) ? "已载入本浏览器保存的密钥" : "";
+    refreshKeyState();
+    setTimeout(() => $("apiKey").focus(), 30);
+  }
+}
+function openSettings(){ location.hash = "#/settings"; }
+function closeSettings(){ location.hash = "#/"; }
+
+/* ------------------------------------------------------------
+   服务器时间（币安签名 timestamp 与服务器偏差超 1 秒会 -1021）
+   ------------------------------------------------------------ */
+let refServer = 0, refPerf = 0, syncOk = false;
+
+async function ensureOffset(force){
+  if (!force && syncOk && performance.now() - refPerf < 60000) return;
+  const urls = [FAPI + "/fapi/v1/time", "https://api.binance.com/api/v3/time"];
+  for (const url of urls){
+    try{
+      const d = await fetchJson(url, { method:"GET" }, 8000);
+      const ms = Number(d.serverTime);
+      if (ms > 0){ refServer = ms; refPerf = performance.now(); syncOk = true; return; }
+    }catch(e){ /* 换下一个时间源 */ }
+  }
+  syncOk = false;
+}
+async function nowMs(){
+  await ensureOffset();
+  if (refServer > 0) return Math.round(refServer + (performance.now() - refPerf));
+  return Date.now();
+}
+
+/* 统一请求：超时不重试，网络错误重试 1 次 */
+async function fetchJson(url, opts, timeoutMs){
+  const t = timeoutMs || 15000;
+  const mk = () => Object.assign({}, opts, { signal: AbortSignal.timeout(t) });
+  try{
+    const r = await fetch(url, mk());
+    return await r.json();
+  }catch(e){
+    if (e && e.name === "TimeoutError") throw new Error("请求超时，请检查网络");
+    const r2 = await fetch(url, mk());
+    return await r2.json();
+  }
+}
+
+/* ------------------------------------------------------------
+   签名请求（GET / POST 共用）
+   ------------------------------------------------------------ */
+async function signedRequest(acct, method, path, params){
+  const build = async () => (params ? params + "&" : "") + "timestamp=" + (await nowMs()) + "&recvWindow=10000";
+  const call = async (q) => {
+    const sig = hmacSha256Hex(acct.secret, q);
+    return fetchJson(FAPI + path + "?" + q + "&signature=" + sig,
+      { method, headers:{ "X-MBX-APIKEY": acct.key } });
+  };
+  let data = await call(await build());
+  if (data && data.code === -1021){          // 时间偏差：重新对时后再试一次
+    await ensureOffset(true);
+    data = await call(await build());
+  }
+  if (data && typeof data === "object" && !Array.isArray(data) && data.code !== undefined){
+    throw new Error(explainCode(data.code, data.msg));
+  }
+  return data;
+}
+function explainCode(code, msg){
+  const map = {
+    "-1022": "签名无效，请检查 Secret Key 是否完整",
+    "-2014": "API Key 格式不正确",
+    "-2015": "API Key 无效、IP 受限，或未开通合约交易权限",
+    "-2011": "未知交易对",
+    "-1021": "请求时间与服务器偏差过大",
+    "-1003": "请求过于频繁，请稍后重试",
+    "-4028": "杠杆倍数超出该合约允许的范围",
+    "-2019": "保证金不足，无法调整",
+    "-2027": "超出当前杠杆允许的最大仓位",
+    "-4046": "没有可用的仓位",
+    "-4131": "该交易对不允许修改杠杆"
+  };
+  return map[String(code)] || ("接口错误 code " + code + (msg ? "：" + msg : ""));
+}
+
+/* 修改杠杆：POST /fapi/v1/leverage */
+async function setLeverage(symbol, leverage){
+  const k = loadKeys();
+  if (!k.key || !k.secret) throw new Error("还没有配置 API 密钥，请先在「设置」里填写");
+  const data = await signedRequest({ key:k.key, secret:k.secret }, "POST", "/fapi/v1/leverage",
+    "symbol=" + encodeURIComponent(symbol) + "&leverage=" + leverage);
+  const got = data && data.leverage !== undefined ? parseInt(data.leverage, 10) : NaN;
+  if (!isFinite(got)) throw new Error("修改杠杆失败，接口未返回结果");
+  return got;
+}
+
+/* ============================================================
+   渲染
+   ============================================================ */
+function escapeHtml(s){
+  return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+}
+/* USDT 名义价值：千分位 + 两位小数 */
+function fmtUsdt(v){
+  const n = Math.abs(Number(v) || 0);
+  return n.toLocaleString("en-US", { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+function fmtLev(v){
+  if (!isFinite(v) || v <= 0) return "—";
+  const s = Number.isInteger(v) ? String(v) : String(parseFloat(v.toFixed(2)));
+  return '<span class="lev">' + s + '<span class="x">x</span></span>';
+}
+function levButton(symbol, lev){
+  return '<button class="lev-btn" data-sym="' + escapeHtml(symbol) + '" title="点击修改杠杆">'
+    + fmtLev(lev)
+    + '<svg class="pen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'
+    + '<path d="M4 20h4.2l9.3-9.3-4.2-4.2L4 15.8V20z"/><path d="M15.8 4.7l1.6-1.6a1.6 1.6 0 0 1 2.3 0l1.2 1.2a1.6 1.6 0 0 1 0 2.3l-1.6 1.6"/></svg>'
+    + '</button>';
+}
+function dirOf(p, amt){
+  if (p.positionSide === "LONG") return { cls:"long", text:"多" };
+  if (p.positionSide === "SHORT") return { cls:"short", text:"空" };
+  return amt > 0 ? { cls:"long", text:"多" } : { cls:"short", text:"空" };
+}
+
+function setStatus(text, kind){
+  const el = $("status");
+  el.className = "status" + (kind ? " " + kind : "");
+  el.innerHTML = text;
+}
+
+/* ------------------------------------------------------------
+   搜索筛选 + 分页渲染（每页 15 个交易对）
+   ------------------------------------------------------------ */
+const PAGE_SIZE = 15;
+let allRows = [];      // 已按 USDT 金额降序排好
+let curPage = 1;
+
+function filterText(){
+  const el = $("filterInput");
+  return el ? el.value.trim().toUpperCase() : "";
+}
+function visibleRows(q){
+  const key = q === undefined ? filterText() : q;
+  if (!key) return allRows;
+  return allRows.filter(r => r.symbol.toUpperCase().indexOf(key) !== -1);
+}
+function totalPages(list){
+  return Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+}
+
+function render(){
+  const tb = $("tbody");
+  const pager = $("pager");
+  const q = filterText();
+  const list = visibleRows(q);
+  $("btnClearFilter").style.display = q ? "" : "none";
+  const tp = totalPages(list);
+  if (curPage > tp) curPage = tp;
+  if (curPage < 1) curPage = 1;
+
+  if (!allRows.length){
+    tb.innerHTML = '<tr><td class="empty" colspan="4">当前没有持仓（所有仓位数量为 0）</td></tr>';
+    $("count").textContent = "0 个仓位";
+    pager.style.display = "none";
+    return;
+  }
+  if (!list.length){
+    tb.innerHTML = '<tr><td class="empty" colspan="4">没有匹配「' + escapeHtml(q) + '」的交易对</td></tr>';
+    $("count").textContent = "0 / " + allRows.length + " 个仓位";
+    pager.style.display = "none";
+    return;
+  }
+
+  const start = (curPage - 1) * PAGE_SIZE;
+  const slice = list.slice(start, start + PAGE_SIZE);
+  tb.innerHTML = slice.map(r => {
+    const d = dirOf(r.raw, r.amt);
+    return '<tr>'
+      + '<td class="sym">' + escapeHtml(r.symbol) + '</td>'
+      + '<td><span class="dir ' + d.cls + '"><i></i>' + d.text + '</span></td>'
+      + '<td class="num">' + fmtUsdt(r.usdt) + '</td>'
+      + '<td>' + levButton(r.symbol, r.lev) + '</td>'
+      + '</tr>';
+  }).join("");
+
+  $("count").textContent = q
+    ? (list.length + " / " + allRows.length + " 个仓位")
+    : (allRows.length + " 个仓位");
+  pager.style.display = "";
+  $("pageInfo").textContent = "共 " + list.length + " 个交易对" + (q ? "（已筛选）" : "")
+    + " · 每页 " + PAGE_SIZE + " 个 · 当前显示第 " + (start + 1) + "-" + (start + slice.length) + " 个";
+  $("pageNow").textContent = curPage + " / " + tp;
+  $("btnPrev").disabled = curPage <= 1;
+  $("btnNext").disabled = curPage >= tp;
+}
+
+function gotoPage(p){
+  curPage = p;                      // 越界由 render 内部夹到 [1, 总页数]
+  render();
+  const wrap = document.querySelector(".tbl-wrap");
+  if (wrap) wrap.scrollTop = 0;
+}
+
+/* ============================================================
+   获取
+   ============================================================ */
+let loading = false;
+
+async function doFetch(){
+  if (loading) return;
+  const saved = loadKeys();
+  if (!saved.key || !saved.secret){
+    setStatus("还没有配置 API 密钥，请点右上角「设置」填写后保存。", "err");
+    openSettings();
+    return;
+  }
+  const key = saved.key, secret = saved.secret;
+  loading = true;
+  $("btnFetch").disabled = true;
+  setStatus('正在获取当前仓位<span class="dots"></span>', "load");
+  try{
+    await ensureOffset();
+    const data = await signedRequest({ key, secret }, "GET", "/fapi/v2/positionRisk", "");
+    if (!Array.isArray(data)) throw new Error("返回格式异常，请检查密钥权限");
+    const rows = [];
+    for (const p of data){
+      const amt = parseFloat(p.positionAmt) || 0;
+      if (amt === 0) continue;                        // 空仓位不显示
+      const mark = parseFloat(p.markPrice) || 0;
+      let usdt = Math.abs(amt) * mark;                // 持仓量 × 标记价格
+      if (!(usdt > 0)) usdt = Math.abs(parseFloat(p.notional) || 0);
+      rows.push({
+        raw: p,
+        symbol: p.symbol,
+        amt: amt,
+        usdt: usdt,
+        lev: parseFloat(p.leverage) || 0
+      });
+    }
+    rows.sort((x, y) => y.usdt - x.usdt);             // USDT 金额从大到小
+    allRows = rows;
+    curPage = 1;
+    render();
+    const t = nowTime();
+    $("stamp").textContent = "更新 " + t;
+    setStatus(rows.length
+      ? "获取成功：" + rows.length + " 个仓位 · " + t
+      : "获取成功，当前没有持仓 · " + t, "ok");
+  }catch(e){
+    allRows = [];
+    curPage = 1;
+    render();
+    setStatus("获取失败：" + escapeHtml(e && e.message ? e.message : String(e)), "err");
+  }finally{
+    loading = false;
+    $("btnFetch").disabled = false;
+  }
+}
+
+/* ============================================================
+   修改杠杆：点击表格中的杠杆倍数打开小窗
+   ============================================================ */
+let levTarget = null;   // { symbol, lev }
+
+/* 弹窗内提示文案：一处控制普通态 / 错误态 */
+function setLevTip(msg, bad){
+  const el = $("levTip");
+  el.className = "dlg-tip" + (bad ? " err" : "");
+  el.textContent = msg;
+}
+
+function openLevDialog(symbol, lev){
+  levTarget = { symbol: symbol, lev: lev };
+  $("levTitle").textContent = symbol + " · 杠杆";
+  $("levCur").textContent = (lev > 0 ? "当前 " + lev + "x" : "当前 —");
+  $("levInput").value = lev > 0 ? lev : "";
+  setLevTip("可填 1 - 150 的整数，不同合约上限不同，以交易所允许的为准。修改立即生效。");
+  $("btnLevSave").disabled = false;
+  $("levMask").style.display = "flex";
+  setTimeout(() => { const el = $("levInput"); el.focus(); el.select(); }, 30);
+}
+function closeLevDialog(){
+  $("levMask").style.display = "none";
+  levTarget = null;
+}
+
+async function confirmLev(){
+  if (!levTarget || $("btnLevSave").disabled) return;
+  const raw = $("levInput").value.trim();
+  if (!/^\d+$/.test(raw)){ setLevTip("请输入整数，比如 10", true); return; }
+  const lev = Number(raw);
+  if (lev < 1 || lev > 150){ setLevTip("杠杆倍数需在 1 - 150 之间", true); return; }
+  const target = levTarget;
+  if (lev === target.lev){ setLevTip("与当前杠杆相同，无需修改"); return; }
+
+  $("btnLevSave").disabled = true;
+  setLevTip("正在提交修改…");
+  try{
+    const got = await setLeverage(target.symbol, lev);
+    const row = allRows.find(r => r.symbol === target.symbol);
+    if (row) row.lev = got;
+    closeLevDialog();
+    render();
+    const t = nowTime();
+    setStatus(escapeHtml(target.symbol) + " 杠杆已改为 " + got + "x（原 " + target.lev + "x）· " + t, "ok");
+  }catch(e){
+    setLevTip((e && e.message) ? e.message : String(e), true);
+  }finally{
+    $("btnLevSave").disabled = false;
+  }
+}
+
+/* ============================================================
+   初始化
+   ============================================================ */
+function saveAndClose(){
+  const k = $("apiKey").value.trim();
+  const s = $("apiSecret").value.trim();
+  if (!k || !s){
+    $("saveHint").textContent = "请把 API Key 与 Secret Key 都填完整";
+    return;
+  }
+  saveKeys(k, s);
+  refreshKeyState();
+  setStatus("密钥已保存，点「获取」读取仓位。", "ok");
+  closeSettings();
+}
+
+(function init(){
+  refreshKeyState();
+  $("btnFetch").addEventListener("click", doFetch);
+  $("btnSettings").addEventListener("click", openSettings);
+  $("btnBack").addEventListener("click", closeSettings);
+  $("btnSaveKeys").addEventListener("click", saveAndClose);
+  $("btnClear").addEventListener("click", clearKeys);
+  $("btnPrev").addEventListener("click", () => gotoPage(curPage - 1));
+  $("btnNext").addEventListener("click", () => gotoPage(curPage + 1));
+
+  /* 搜索筛选 */
+  $("filterInput").addEventListener("input", () => { curPage = 1; render(); });
+  $("filterInput").addEventListener("keydown", e => {
+    if (e.key === "Escape"){ $("filterInput").value = ""; curPage = 1; render(); }
+  });
+  $("btnClearFilter").addEventListener("click", () => {
+    $("filterInput").value = "";
+    curPage = 1;
+    render();
+    $("filterInput").focus();
+  });
+
+  /* 点击杠杆倍数 → 打开修改小窗 */
+  $("tbody").addEventListener("click", e => {
+    const btn = e.target.closest(".lev-btn");
+    if (!btn) return;
+    const sym = btn.getAttribute("data-sym");
+    const row = allRows.find(r => r.symbol === sym);
+    if (!row) return;
+    openLevDialog(sym, row.lev);
+  });
+  $("btnLevCancel").addEventListener("click", closeLevDialog);
+  $("btnLevSave").addEventListener("click", confirmLev);
+  $("levMask").addEventListener("click", e => { if (e.target === $("levMask")) closeLevDialog(); });
+  $("levInput").addEventListener("keydown", e => {
+    if (e.key === "Enter"){ e.preventDefault(); confirmLev(); }
+    if (e.key === "Escape"){ closeLevDialog(); }
+  });
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && $("levMask").style.display !== "none") closeLevDialog();
+  });
+  ["apiKey", "apiSecret"].forEach(id => {
+    $(id).addEventListener("keydown", e => { if (e.key === "Enter") saveAndClose(); });
+  });
+  window.addEventListener("hashchange", route);
+  route();
+})();
+</script>
+</body>
+</html>
