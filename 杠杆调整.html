@@ -127,6 +127,7 @@
   }
   button.ghost:hover:not(:disabled){ color:var(--acc2); border-color:#33507f; }
   .hd-btn{ padding:7px 20px; font-size:12.5px; border-radius:8px; box-shadow:none; }
+  .hd-btn.max{ background:linear-gradient(150deg,#db7c2e,#9c4415); box-shadow:none; }
 
   /* ---------- 状态 ---------- */
   .status{
@@ -267,6 +268,7 @@
           <button class="search-clear" id="btnClearFilter" title="清空搜索" style="display:none">×</button>
         </div>
         <span class="count" id="count"></span>
+        <button id="btnMaxLev" class="hd-btn max" title="把所有有仓位的合约杠杆调到各自允许的最大值">全部拉满</button>
         <button id="btnFetch" class="hd-btn">获取</button>
       </div>
       <div class="status" id="status">点击「获取」读取当前仓位；密钥在上方「设置」里填写。</div>
@@ -296,7 +298,7 @@
           <button class="pg-btn" id="btnNext">下一页</button>
         </div>
       </div>
-      <p class="foot">数据来自币安合约 <code>/fapi/v2/positionRisk</code>，只列出数量不为 0 的仓位。仓位数量按标记价格折算为 USDT 名义价值（持仓量 × 标记价格），按金额从大到小排列，每页 15 个交易对。<strong>点击杠杆倍数可修改该合约杠杆</strong>。需要本机可访问币安（国内网络请先开启代理），否则会提示请求超时。</p>
+      <p class="foot">数据来自币安合约 <code>/fapi/v2/positionRisk</code>，只列出数量不为 0 的仓位。仓位数量按标记价格折算为 USDT 名义价值（持仓量 × 标记价格），按金额从大到小排列，每页 15 个交易对。<strong>点击杠杆倍数可修改该合约杠杆</strong>；右上「全部拉满」会把所有有仓位的合约杠杆一键调到各自允许的最大值（档位取自 <code>/fapi/v1/leverageBracket</code>，超出允许范围会自动降级）。需要本机可访问币安（国内网络请先开启代理），否则会提示请求超时。</p>
     </section>
   </div>
 
@@ -570,14 +572,127 @@ function explainCode(code, msg){
 }
 
 /* 修改杠杆：POST /fapi/v1/leverage */
-async function setLeverage(symbol, leverage){
-  const k = loadKeys();
+async function setLeverage(symbol, leverage, acct){
+  const k = acct || loadKeys();
   if (!k.key || !k.secret) throw new Error("还没有配置 API 密钥，请先在「设置」里填写");
   const data = await signedRequest({ key:k.key, secret:k.secret }, "POST", "/fapi/v1/leverage",
     "symbol=" + encodeURIComponent(symbol) + "&leverage=" + leverage);
   const got = data && data.leverage !== undefined ? parseInt(data.leverage, 10) : NaN;
   if (!isFinite(got)) throw new Error("修改杠杆失败，接口未返回结果");
   return got;
+}
+
+/* ============================================================
+   一键拉满：把所有有仓位的合约杠杆调到各自允许的最大值
+   档位来自 /fapi/v1/leverageBracket（初始保证金杠杆），按当前名义价值挑能覆盖的那一档
+   ============================================================ */
+const MAX_LEV_CAP = 150;                 // 与手动改杠杆的上限一致
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+let levAllBusy = false;
+
+/* 候选杠杆：从「当前仓位允许的最高档」开始，逐级向下备用（报错时自动降级） */
+function levCandidates(brackets, notional){
+  const caps = (brackets || []).map(b => ({
+    lev: Math.floor(parseFloat(b.initialLeverage) || 0),
+    cap: parseFloat(b.notionalCap) || 0
+  })).filter(x => x.lev > 0);
+  if (!caps.length) return [];
+  caps.sort((a, b) => a.cap - b.cap);                      // 名义价值上限：从小到大
+  const fit = caps.find(x => notional <= x.cap);            // 能覆盖当前仓位的最小档
+  const top = Math.min((fit || caps[caps.length - 1]).lev, MAX_LEV_CAP);
+  const all = Array.from(new Set(caps.map(x => x.lev))).sort((a, b) => b - a)
+    .filter(v => v <= top);
+  return all.length ? all : [top];
+}
+
+async function maxAllLeverage(){
+  if (loading || levAllBusy) return;
+  const saved = loadKeys();
+  if (!saved.key || !saved.secret){
+    setStatus("还没有配置 API 密钥，请点右上角「设置」填写后保存。", "err");
+    openSettings();
+    return;
+  }
+  const acct = { key: saved.key, secret: saved.secret };
+  const btn = $("btnMaxLev");
+  levAllBusy = true; btn.disabled = true;
+  try{
+    setStatus('正在读取当前仓位与杠杆档位<span class="dots"></span>', "load");
+    await ensureOffset();
+    const [pos, bracketData] = await Promise.all([
+      signedRequest(acct, "GET", "/fapi/v2/positionRisk", ""),
+      signedRequest(acct, "GET", "/fapi/v1/leverageBracket", "")
+    ]);
+    if (!Array.isArray(pos)) throw new Error("返回格式异常，请检查密钥权限");
+
+    const brackets = {};
+    (Array.isArray(bracketData) ? bracketData : []).forEach(x => { brackets[x.symbol] = x.brackets || []; });
+
+    /* 同一个交易对多空都开时合并成一条，名义价值取大者 */
+    const map = {};
+    pos.forEach(p => {
+      const amt = parseFloat(p.positionAmt) || 0;
+      if (amt === 0) return;
+      const mark = parseFloat(p.markPrice) || 0;
+      let nt = Math.abs(amt) * mark;
+      if (!(nt > 0)) nt = Math.abs(parseFloat(p.notional) || 0);
+      const lev = Math.floor(parseFloat(p.leverage) || 0);
+      const cur = map[p.symbol] || { symbol: p.symbol, notional: 0, curLev: 0 };
+      cur.notional = Math.max(cur.notional, nt);
+      if (lev > 0) cur.curLev = Math.max(cur.curLev, lev);
+      map[p.symbol] = cur;
+    });
+    const targets = Object.values(map).sort((a, b) => b.notional - a.notional);
+    if (!targets.length){
+      setStatus("当前没有持仓，没有需要调整杠杆的合约。", "ok");
+      return;
+    }
+
+    const plan = targets.map(t => {
+      const c = levCandidates(brackets[t.symbol], t.notional);
+      return { t: t, want: c.length ? c[0] : 0, cands: c };
+    });
+    const lines = plan.map(x => x.t.symbol + " " + (x.t.curLev ? x.t.curLev + "x → " : "→ ")
+      + (x.want ? x.want + "x" : "（无档位数据）")).join("\n");
+    if (!confirm("将把 " + targets.length + " 个有仓位的合约杠杆调到各自允许的最大值：\n\n"
+        + lines + "\n\n杠杆拉满后保证金占用变小，但强平价格会更靠近，风险明显变大。确定执行？")){
+      setStatus("已取消，未改动任何杠杆。", "ok");
+      return;
+    }
+
+    const done = [], skipped = [], failed = [];
+    for (let i = 0; i < plan.length; i++){
+      const x = plan[i];
+      setStatus('正在调整 ' + (i + 1) + ' / ' + plan.length + '：' + escapeHtml(x.t.symbol) + '<span class="dots"></span>', "load");
+      if (!x.cands.length){ failed.push(x.t.symbol + "：没有杠杆档位数据"); continue; }
+      if (x.cands[0] === x.t.curLev){ skipped.push(x.t.symbol + " " + x.t.curLev + "x"); continue; }
+      let lastErr = null;
+      for (const lev of x.cands){
+        try{
+          const got = await setLeverage(x.t.symbol, lev, acct);
+          done.push(x.t.symbol + " " + (x.t.curLev ? x.t.curLev + "x → " : "→ ") + got + "x");
+          lastErr = null;
+          break;
+        }catch(e){ lastErr = e; }
+      }
+      if (lastErr) failed.push(x.t.symbol + "：" + escapeHtml(lastErr.message || String(lastErr)));
+      if (i < plan.length - 1) await sleep(150);
+    }
+
+    await doFetch();                                  // 重新拉仓位，表格里的杠杆才是最新的
+    const t = nowTime();
+    let html = "杠杆调整完成 · " + t + "：成功 " + done.length + " 个";
+    if (skipped.length) html += "，已是最高 " + skipped.length + " 个";
+    if (failed.length) html += "，失败 " + failed.length + " 个";
+    if (done.length) html += "<br>已拉满：" + escapeHtml(done.join("、"));
+    if (skipped.length) html += "<br>本就最高：" + escapeHtml(skipped.join("、"));
+    if (failed.length) html += "<br>失败明细：" + failed.join("；");
+    setStatus(html, failed.length ? "err" : "ok");
+  }catch(e){
+    setStatus("拉满杠杆失败：" + escapeHtml(e && e.message ? e.message : String(e)), "err");
+  }finally{
+    levAllBusy = false; btn.disabled = false;
+  }
 }
 
 /* ============================================================
@@ -816,6 +931,7 @@ function saveAndClose(){
 (function init(){
   refreshKeyState();
   $("btnFetch").addEventListener("click", doFetch);
+  $("btnMaxLev").addEventListener("click", maxAllLeverage);
   $("btnSettings").addEventListener("click", openSettings);
   $("btnBack").addEventListener("click", closeSettings);
   $("btnSaveKeys").addEventListener("click", saveAndClose);
